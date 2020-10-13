@@ -31,5 +31,5 @@ Using None value for weights
 Processing 13233 files in multi-threaded mode...
 Using 4 workers...
 --- Mode multi took 24.600640296936035 seconds ---
-Successfully converted 13233 image!
+Successfully converted 13233 images!
 ```

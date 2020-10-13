@@ -124,7 +124,7 @@ def batch_processing(src, dest, mode="single", max_workers=4, weights=None):
     print("--- Mode {} took {} seconds ---".format(mode, time.time() - start_time))
 
     # print total conversion success count
-    print("Successfully converted {} image!".format(convert_sucess))
+    print("Successfully converted {} images!".format(convert_sucess))
 
 if __name__ == "__main__":
     batch_processing(args.get("source"), args.get("destination"), mode=args.get("thread", "multi"), max_workers=args.get("max_workers", 4), weights=args.get("weights", None))
