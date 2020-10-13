@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head>
+    <title>File Upload</title>
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+        <ul class=flashes>
+        {% for message in messages %}
+        <li>{{ message }}</li>
+        {% endfor %}
+        </ul>
+    {% endif %}
+    {% endwith %}
+  </head>
+  <body>
+    <h1>File Upload</h1>
+    <form method="POST" action="upload_file" enctype="multipart/form-data">
+      <p><input type="file" name="file"></p>
+      <p><input type="submit" value="Submit"></p>
+    </form>
+    <hr>
+    {% for file in files %}
+      <img src="{{ url_for('upload', filename=file) }}" style="width: 64px">
+    {% endfor %}
+  </body>
+</html>

@@ -1,0 +1,12 @@
+
+{
+    "MAX_CONTENT_LENGTH" :2097152,
+    "VALID_EXTENSIONS" : ["jpg","png", "zip"],
+    "UPLOAD_FOLDER" : "tmp/uploads",
+    "PROCESSED_FOLDER" : "tmp/processed",
+    "MODE" : "multi",
+    "WORKERS" : 4,
+    "WEIGHTS" : "None",
+    "DELETE_UPLOADS" : true,
+    "DELETE_PROCESSED" : true
+}
