@@ -1,10 +1,12 @@
 # threaded_image_converter
 Simple script which using parallel processing to read images, convert them to grayscale, then right them back to the filesystem
 
-This application uses Python 3's concurrent.futures.ThreadPoolExecutor to spawn multiple workers which:
-1. Read the image file into main memory (from a specified directory)
+This application uses Python 3's `concurrent.futures.ThreadPoolExecutor` to spawn multiple workers which:
+1. Read an image file into main memory (from a specified directory)
 2. Use numpy to convert the image to grayscale
 3. Save the image back to a destination directory
+
+This application is able to batch-process entire image folders either in serial or multithreaded mode.
 
 ## Arguments:
 1. `source` (REQUIRED, `str`): source image folder, must be an absolute path
