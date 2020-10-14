@@ -1,11 +1,13 @@
 import os, sys, time
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor
 import concurrent.futures
 import argparse
+import asyncio
 
 from os.path import join, isfile
 from PIL import Image
+from threading import BoundedSemaphore
+from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
 
 # command line arguments
 ap = argparse.ArgumentParser()
@@ -52,7 +54,7 @@ def load_convert_save_image(src, img, dest, weights):
         return -1
 
 ### Serial or multithreaded batch image processing
-def batch_processing(src, dest, mode="single", max_workers=4, weights=None):
+def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights=None):
     # check if source directory exists
     if not os.path.exists(src):
         print("Source directory does not exist")
@@ -107,18 +109,38 @@ def batch_processing(src, dest, mode="single", max_workers=4, weights=None):
     # enter multi threaded (serial) mode
     elif mode == "multi":
         print("Using {} workers...".format(max_workers))
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # submit function extract_single_image with image_rul as the argument
-            executed = {executor.submit(load_convert_save_image, src, image, dest, weights) for image in image_files}
 
-            for future in concurrent.futures.as_completed(executed):
-                try:
-                    # returns 1 or 0; if 0 -> success, add to success count
-                    res = future.result()
-                    if res == 0:
-                        convert_sucess += 1
-                except Exception as e:
-                  print("Exception encountered: {}".format(repr(e)))
+        executed = set()
+
+        semaphore = BoundedSemaphore(bound + max_workers)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+
+            if bound > 0: 
+                semaphore.acquire()
+
+                for image in image_files:
+                    try:
+                        submitted = executor.submit(load_convert_save_image, src, image, dest, weights)
+                    except:
+                        semaphore.release()
+                        raise
+                    else:
+                        submitted.add_done_callback(lambda x: semaphore.release())
+                        executed.add(submitted)
+
+            else:
+                # submit function extract_single_image with image_rul as the argument
+                
+                executed = {executor.submit(load_convert_save_image, src, image, dest, weights) for image in image_files}
+
+                for future in concurrent.futures.as_completed(executed):
+                    try:
+                        # returns 1 or 0; if 0 -> success, add to success count
+                        res = future.result()
+                        if res == 0:
+                            convert_sucess += 1
+                    except Exception as e:
+                        print("Exception encountered: {}".format(repr(e)))
 
     # print total execution time (for comparison)
     print("--- Mode {} took {} seconds ---".format(mode, time.time() - start_time))
