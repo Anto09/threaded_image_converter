@@ -36,6 +36,8 @@ def upload_file():
 
     if request.method == 'POST':
 
+        file = request.files["file"]
+
         # check for valid uploads, exit and flash warning if invalid
         if "file" not in request.files:
             flash("No file in request")
@@ -50,8 +52,7 @@ def upload_file():
             return redirect(url_for("index"))
 
         print("Posted file: {}".format(request.files["file"]))
-        file = request.files["file"]
-
+        
         # files = {'file': file.read()}
         # for read_file in files:
         #     print(read_file)
