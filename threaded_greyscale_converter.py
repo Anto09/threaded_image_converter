@@ -14,6 +14,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("-s", "--source", help="source folder; provide absolute path", type=str)
 ap.add_argument("-d", "--destination", help="destination folder; provide absolute path", type=str)
 ap.add_argument("-m", "--max_workers", help="number of workers to use for multi-threading", type=int, default=4)
+ap.add_argument("-b", "--semaphore_bound", help="maximum sephamore counter value", type=int, default=0)
 ap.add_argument("-t", "--thread", help="single or multi", type=str, default="multi")
 ap.add_argument("-w", "--weights", help="grayscale with weights vs average(default)", type=str, default=None)
 args = vars(ap.parse_args())
@@ -55,7 +56,7 @@ def load_convert_save_image(src, img, dest, weights):
         return -1
 
 ### Serial or multithreaded batch image processing
-def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights=None):
+def batch_processing(src, dest, mode="single", max_workers=4, bound=0, weights=None):
     # check if source directory exists
     if not os.path.exists(src):
         print("Source directory does not exist")
@@ -154,4 +155,4 @@ def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights
     print("Successfully converted {} images!".format(convert_sucess))
 
 if __name__ == "__main__":
-    batch_processing(args.get("source"), args.get("destination"), mode=args.get("thread", "multi"), max_workers=args.get("max_workers", 4), weights=args.get("weights", None))
+    batch_processing(args.get("source"), args.get("destination"), mode=args.get("thread", "multi"), max_workers=args.get("max_workers", 4), bound=args.get("semaphore_bound", 0), weights=args.get("weights", None))
