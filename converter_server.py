@@ -105,6 +105,7 @@ def upload_file():
                          dest=dest,
                          mode=app.config["MODE"],
                          max_workers=app.config["WORKERS"],
+                         bound=app.config["BOUND"],
                          weights=weights)
 
         # empty tmp upload directory (if required)
