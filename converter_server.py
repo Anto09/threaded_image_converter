@@ -1,8 +1,30 @@
-import requests, os, zipfile, shutil, json
+import requests, os, zipfile, shutil, json, re
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file,send_from_directory, after_this_request
 from werkzeug.utils import secure_filename
 from threaded_greyscale_converter import batch_processing
 from tempfile import NamedTemporaryFile
+from datetime import datetime
+
+# add a timestamp to the filename
+def add_timestamp_to_filename(filename):
+    now = datetime.now()
+
+    split_name = filename.split(".")
+    return "{}_{}.{}".format(split_name[0], now.strftime("D%Y%m%dT%H%M%S"), split_name[1])
+
+# remove timestamp from a filename
+def remove_timestamp_from_filename(filename):
+    # split into name and extension
+    split_name = filename.split(".")
+
+    regex = r"_D\d{8}T\d{6}"
+    match = re.search(regex, split_name[0])
+
+    removed_timestamp_name = split_name[0][:match.span()[0]] + split_name[0][match.span()[1]:]
+    return removed_timestamp_name + "." + split_name[1]
+
+    # for no timestamps
+    #return "_".join(split_name[0].split("_")[0:-1]) + "." + split_name[1]
 
 # create app with a loaded config
 def create_app():
@@ -58,14 +80,14 @@ def upload_file():
         #     print(read_file)
 
         # store filename and upload directory
-        filename = secure_filename(file.filename)
-        path_to_file_upload = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        stamped_filename = add_timestamp_to_filename(file.filename)
+        path_to_file_upload = os.path.join(app.config["UPLOAD_FOLDER"], stamped_filename)
         file.stream.seek(0)
         file.save(path_to_file_upload)
 
         # get all zip file names and extract them to the upload folder
         zip_files = []
-        if is_zip(file.filename):
+        if is_zip(stamped_filename):
             with zipfile.ZipFile(path_to_file_upload, "r") as zip_obj:
                 zip_files = zip_obj.namelist()
                 zip_obj.extractall(os.path.join(os.getcwd(), app.config["UPLOAD_FOLDER"]))
@@ -88,7 +110,7 @@ def upload_file():
         # empty tmp upload directory (if required)
         try:
             if app.config["DELETE_UPLOADS"]:
-                if is_zip(file.filename):
+                if is_zip(stamped_filename):
                     for zip_file in zip_files:
                         os.remove(os.path.join(app.config["UPLOAD_FOLDER"], zip_file))
                 os.remove(path_to_file_upload)
@@ -98,13 +120,13 @@ def upload_file():
 
         # send the files automatically
         try:
-            if is_zip(file.filename):
-                new_zip = file.filename.split(".")[0] + "_gray" + file.filename.split(".")[1]
+            if is_zip(stamped_filename):
+                new_zip = stamped_filename.split(".")[0] + "_gray" + "." + stamped_filename.split(".")[1]
                 return redirect(url_for("get_zip", zip_filename=new_zip, images=zip_files))
             else:
                 # just return single files
-                img_name = file.filename.split(".")[0]
-                extension = file.filename.split(".")[1]
+                img_name = stamped_filename.split(".")[0]
+                extension = stamped_filename.split(".")[1]
 
                 processed_filename = "{}_gray.{}".format(img_name, extension)
                 return redirect(url_for("get_image", image_filename=processed_filename))
@@ -131,13 +153,13 @@ def get_image(image_filename):
             os.remove(os.path.join(dest, image_filename))
 
             try:
-                return send_file(temp_image, as_attachment=True, attachment_filename=image_filename)
+                return send_file(temp_image, as_attachment=True, attachment_filename=remove_timestamp_from_filename(image_filename))
             except FileNotFoundError:
                 return "404 File not found"
         except Exception as e:
             return "Exception {} encountered".format(repr(e))
     else:
-        return send_from_directory(dest, image_filename, as_attachment=True)
+        return send_from_directory(dest, image_filename, as_attachment=True, attachment_filename=remove_timestamp_from_filename(image_filename))
 
 # make a route just in case auto delete is turned off and you want to retrieve a bunch of processed pictures
 @app.route("/get_zip/",methods = ["GET","POST"])
@@ -175,13 +197,13 @@ def get_zip():
             os.remove(os.path.join(dest, zip_filename))
 
             try:
-                return send_file(temp_zip, as_attachment=True, attachment_filename=zip_filename)
+                return send_file(temp_zip, as_attachment=True, attachment_filename=remove_timestamp_from_filename(zip_filename))
             except FileNotFoundError:
                 return "404 File not found"
         except Exception as e:
             return "Exception {} encountered".format(repr(e))
     else:
-        return send_from_directory(dest, zip_filename, as_attachment=True)
+        return send_from_directory(dest, zip_filename, as_attachment=True, attachment_filename=remove_timestamp_from_filename(zip_filename))
 
 
 if __name__ == "__main__":
