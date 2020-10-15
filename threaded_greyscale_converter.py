@@ -50,7 +50,8 @@ def load_convert_save_image(src, img, dest, weights):
 
         return 0
 
-    except Exception:
+    except Exception as e:
+        print("Exception encountered while converting to greyscale: {}".format(repr(e)))
         return -1
 
 ### Serial or multithreaded batch image processing
@@ -94,6 +95,7 @@ def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights
     print("Using {} value for weights".format(weights))
     print("Processing {} files in {}-threaded mode...".format(len(image_files), mode))
 
+
     # initialize performance metrics
     start_time = time.time()
     convert_sucess = 0
@@ -121,9 +123,12 @@ def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights
                 for image in image_files:
                     try:
                         submitted = executor.submit(load_convert_save_image, src, image, dest, weights)
+                        res = submitted.result()
+                        if res == 0:
+                            convert_sucess += 1
                     except:
                         semaphore.release()
-                        raise
+                        print("Exception encountered: {}".format(repr(e)))
                     else:
                         submitted.add_done_callback(lambda x: semaphore.release())
                         executed.add(submitted)
