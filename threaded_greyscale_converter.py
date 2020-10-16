@@ -1,4 +1,4 @@
-import os, sys, time
+import os, sys, time, filelock
 import numpy as np
 import concurrent.futures
 import argparse
@@ -6,15 +6,16 @@ import asyncio
 
 from os.path import join, isfile
 from PIL import Image
-from threading import BoundedSemaphore
+from threading import Semaphore
 from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
+
+from timestamp_utils import check_for_timestamp
 
 # command line arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-s", "--source", help="source folder; provide absolute path", type=str)
 ap.add_argument("-d", "--destination", help="destination folder; provide absolute path", type=str)
 ap.add_argument("-m", "--max_workers", help="number of workers to use for multi-threading", type=int, default=4)
-ap.add_argument("-b", "--semaphore_bound", help="maximum sephamore counter value", type=int, default=100)
 ap.add_argument("-t", "--thread", help="single or multi", type=str, default="multi")
 ap.add_argument("-w", "--weights", help="grayscale with weights vs average(default)", type=str, default=None)
 args = vars(ap.parse_args())
@@ -27,9 +28,15 @@ def convert_to_greyscale(img_mat, use_avg=True, weights=np.array([0.21, 0.72, 0.
         return np.dot(img_mat[...,:3], weights)
 
 # Use ThreadPoolExecutor on this function
-def load_convert_save_image(src, img, dest, weights):
+def load_convert_save_image(src, img, dest, weights, use_lock=False):
     try:
-        rgb = Image.open(join(src, img))
+        if use_lock:
+            print("locking")
+            lock = filelock.FileLock(img)
+            with lock:
+                rgb = Image.open(join(src, img))
+        else:
+            rgb = Image.open(join(src, img))
 
         # figure out if convert function will be using averaging or not
         # if weights are present check if default weights are to be used
@@ -56,7 +63,7 @@ def load_convert_save_image(src, img, dest, weights):
         return -1
 
 ### Serial or multithreaded batch image processing
-def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights=None):
+def batch_processing(src, dest, mode="single", max_workers=4, weights=None, timestamp_to_match=None, use_semaphore=True):
     # check if source directory exists
     if not os.path.exists(src):
         print("Source directory does not exist")
@@ -65,10 +72,12 @@ def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights
     # extract all files 
     files = [f for f in os.listdir(src) if isfile(join(src, f))]
 
-    # clean image files; don't consider anything that's not a png or jpg file
+    # clean image files; don't consider anything that's not a png or jpg file and for files that don't have the timestamp to look for (for archived files)
     image_files = []
     for image in files:
         if "jpg" not in image and "png" not in image:
+            continue
+        elif timestamp_to_match is not None and check_for_timestamp(image, timestamp_to_match) is None:
             continue
         else:
             image_files.append(image)
@@ -115,13 +124,14 @@ def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights
 
         executed = set()
 
-        semaphore = BoundedSemaphore(bound + max_workers)
+        # we only want there to
+        # semaphore = BoundedSemaphore(len(image_files))
+        semaphore = Semaphore(max_workers)
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
 
-            if bound > 0: 
-                semaphore.acquire()
-
+            if use_semaphore: 
                 for image in image_files:
+                    semaphore.acquire()
                     try:
                         submitted = executor.submit(load_convert_save_image, src, image, dest, weights)
                         res = submitted.result()
@@ -133,6 +143,7 @@ def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights
                     else:
                         submitted.add_done_callback(lambda x: semaphore.release())
                         executed.add(submitted)
+                        semaphore.release()
 
             else:
                 # submit function extract_single_image with image_rul as the argument
@@ -155,4 +166,4 @@ def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights
     print("Successfully converted {} images!".format(convert_sucess))
 
 if __name__ == "__main__":
-    batch_processing(args.get("source"), args.get("destination"), mode=args.get("thread", "multi"), max_workers=args.get("max_workers", 4), bound=args.get("semaphore_bound", 100), weights=args.get("weights", None))
+    batch_processing(args.get("source"), args.get("destination"), mode=args.get("thread", "multi"), max_workers=args.get("max_workers", 4), weights=args.get("weights", None))
