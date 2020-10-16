@@ -11,8 +11,8 @@ This application is able to batch-process entire image folders either in serial 
 ## Arguments:
 1. `source` (REQUIRED, `str`): source image folder, must be an absolute path
 2. `destination` (REQUIRED, `str`): destination image folder, must be an absolute path. Application will attempt to create the folder if it does not exist
-3. `max_workers` (OPTIONAL, `int`): Running `cat /proc/cpuinfo | grep processor | wc -l` will display the number of cores available which will be your number of max_workers. Defaults to value of 4.
-4. `semaphore_bound` (OPTIONAL, `int`): Maximum counter value for the Semaphore. Defaults to a value of 0.
+3. `max_workers` (OPTIONAL, `int`): Running `cat /proc/cpuinfo | grep processor | wc -l` will display the number of cores available which will be your number of max_workers. Defaults to a value of 4. Note: default value assigned by Python's `concurrent.futures.ThreadPoolExecutor` is `<num_processors> * 5`.
+4. `semaphore_bound` (OPTIONAL, `int`): Added value to the maximum counter value for the Semaphore. The true maximum counter is `max_workers + semaphore_bound`. Defaults to a value of 0 (recommended). It is advisable to manipulate `max_workers` instead.
 5. `thread` (OPTIONAL, `str`): Thread mode; can either be `single` or `multi`. Defaults to `multi`
 6.. `weights` (OPTIONAL, `str`): Weights to be used for non-average grayscaling. Must be a 3-element numpy vector, corresponding to the RGB weights, in string format (`[r, g, b]`). Defaults to `None`.
 
