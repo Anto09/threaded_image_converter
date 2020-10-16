@@ -1,30 +1,11 @@
-import requests, os, zipfile, shutil, json, re
+import requests, os, zipfile, shutil, json, platform, filelock
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file,send_from_directory, after_this_request
 from werkzeug.utils import secure_filename
 from threaded_greyscale_converter import batch_processing
 from tempfile import NamedTemporaryFile
-from datetime import datetime
 
-# add a timestamp to the filename
-def add_timestamp_to_filename(filename):
-    now = datetime.now()
-
-    split_name = filename.split(".")
-    return "{}_{}.{}".format(split_name[0], now.strftime("D%Y%m%dT%H%M%S"), split_name[1])
-
-# remove timestamp from a filename
-def remove_timestamp_from_filename(filename):
-    # split into name and extension
-    split_name = filename.split(".")
-
-    regex = r"_D\d{8}T\d{6}"
-    match = re.search(regex, split_name[0])
-
-    removed_timestamp_name = split_name[0][:match.span()[0]] + split_name[0][match.span()[1]:]
-    return removed_timestamp_name + "." + split_name[1]
-
-    # for no timestamps
-    #return "_".join(split_name[0].split("_")[0:-1]) + "." + split_name[1]
+from timestamp_utils import add_timestamp_to_filename, get_timestamp_from_filename, remove_timestamp_from_filename
+from file_utils import lock_delete
 
 # create app with a loaded config
 def create_app():
@@ -85,45 +66,67 @@ def upload_file():
         file.stream.seek(0)
         file.save(path_to_file_upload)
 
+        src = os.path.join(os.getcwd(), app.config["UPLOAD_FOLDER"])
+        dest = os.path.join(os.getcwd(), app.config["PROCESSED_FOLDER"])
+
         # get all zip file names and extract them to the upload folder
         zip_files = []
+        stamped_zipped_filenames = []
+        
         if is_zip(stamped_filename):
             with zipfile.ZipFile(path_to_file_upload, "r") as zip_obj:
+                # zip_obj.extractall(src)
+
+                # add timestamping to unzip files
                 zip_files = zip_obj.namelist()
-                zip_obj.extractall(os.path.join(os.getcwd(), app.config["UPLOAD_FOLDER"]))
+                zip_timestamp = get_timestamp_from_filename(stamped_filename)
+                for target_file in zip_files: 
+
+                    split_target = target_file.split(".")
+                    target_name = split_target[0] + "_" + zip_timestamp + "." + split_target[1]
+
+                    stamped_zipped_filenames.append(target_name)
+                    target_path = os.path.join(src, target_name)
+                    with open(target_path, "wb") as f: 
+                        f.write(zip_obj.read(target_file)) 
 
         # initialize greyscale converter pipeline
         weights = app.config["PROCESSED_FOLDER"]
         if weights == "None":
             weights = None
 
-        src = os.path.join(os.getcwd(), app.config["UPLOAD_FOLDER"])
-        dest = os.path.join(os.getcwd(), app.config["PROCESSED_FOLDER"])
+        print("Processing...")
 
         # process uploads
         batch_processing(src=src,
                          dest=dest,
                          mode=app.config["MODE"],
                          max_workers=app.config["WORKERS"],
-                         bound=app.config["BOUND"],
                          weights=weights)
+
+        print("Done")
 
         # empty tmp upload directory (if required)
         try:
             if app.config["DELETE_UPLOADS"]:
                 if is_zip(stamped_filename):
-                    for zip_file in zip_files:
-                        os.remove(os.path.join(app.config["UPLOAD_FOLDER"], zip_file))
-                os.remove(path_to_file_upload)
+                    for zip_file in stamped_zipped_filenames:
+                        lock_delete(os.path.join(src, zip_file))
+                
+                lock_delete(path_to_file_upload)
 
         except Exception as e:
             print("Encountered error deleting files: {}".format(repr(e)))
 
+        print("Sending files...")
         # send the files automatically
         try:
             if is_zip(stamped_filename):
                 new_zip = stamped_filename.split(".")[0] + "_gray" + "." + stamped_filename.split(".")[1]
-                return redirect(url_for("get_zip", zip_filename=new_zip, images=zip_files))
+
+                # return redirect(url_for("get_zip", zip_filename=new_zip, images=zip_files))
+                # add timestamp to zip
+                return redirect(url_for("get_zip", zip_filename=new_zip, images=stamped_zipped_filenames))
             else:
                 # just return single files
                 img_name = stamped_filename.split(".")[0]
@@ -132,7 +135,9 @@ def upload_file():
                 processed_filename = "{}_gray.{}".format(img_name, extension)
                 return redirect(url_for("get_image", image_filename=processed_filename))
         except Exception as e:
-            flash("Exception encountered: {}".format(repr(e)))
+            exception_msg = "Exception encountered: {}".format(repr(e))
+            print(exception_msg)
+            flash(exception_msg)
             return redirect(url_for("index"))
 
 
@@ -140,6 +145,8 @@ def upload_file():
 @app.route("/get_image/<image_filename>",methods = ["GET","POST"])
 def get_image(image_filename):
     dest = os.path.join(os.getcwd(), app.config["PROCESSED_FOLDER"])
+
+    print("Sending back image {}...".format(image_filename))
 
     if app.config["DELETE_PROCESSED"]:
         try: 
@@ -151,7 +158,7 @@ def get_image(image_filename):
             temp_image.seek(0,0)
 
             # delete processed image
-            os.remove(os.path.join(dest, image_filename))
+            lock_delete(os.path.join(dest, image_filename))
 
             try:
                 return send_file(temp_image, as_attachment=True, attachment_filename=remove_timestamp_from_filename(image_filename))
@@ -166,9 +173,11 @@ def get_image(image_filename):
 @app.route("/get_zip/",methods = ["GET","POST"])
 def get_zip():
     zip_filename = request.args["zip_filename"]
+    print("Sending back zip {}...".format(zip_filename))
     images = request.args.getlist("images")
     dest = os.path.join(os.getcwd(), app.config["PROCESSED_FOLDER"])
 
+    # write to zip
     with zipfile.ZipFile(os.path.join(dest, zip_filename), "w") as zip_obj:
         for zip_file in images:
 
@@ -179,12 +188,13 @@ def get_zip():
             image_filename = "{}_gray.{}".format(img_name, extension)
 
             # write to zip
-            zip_obj.write(os.path.join(dest, image_filename), image_filename)
+            zip_obj.write(os.path.join(dest, image_filename), remove_timestamp_from_filename(image_filename))
     
             # delete if needed
             if app.config["DELETE_PROCESSED"]:
-                os.remove(os.path.join(dest, image_filename))
+                lock_delete(os.path.join(dest, image_filename))
 
+    # send and delete
     if app.config["DELETE_PROCESSED"]:
         try: 
             # copy zip into a temporary file so we can close the file reader, delete our file, and still send our temp zip
@@ -194,8 +204,8 @@ def get_zip():
             zip_file_handle.close()
             temp_zip.seek(0,0)
 
-            # delete processed zip
-            os.remove(os.path.join(dest, zip_filename))
+            # delete processed zipfile
+            lock_delete(os.path.join(dest, zip_filename))
 
             try:
                 return send_file(temp_zip, as_attachment=True, attachment_filename=remove_timestamp_from_filename(zip_filename))
