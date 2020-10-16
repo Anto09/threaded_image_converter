@@ -127,7 +127,6 @@ def batch_processing(src, dest, mode="single", max_workers=4, bound=100, weights
                         res = submitted.result()
                         if res == 0:
                             convert_sucess += 1
-                        semaphore.release()
                     except:
                         semaphore.release()
                         print("Exception encountered: {}".format(repr(e)))
