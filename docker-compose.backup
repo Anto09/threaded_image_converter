@@ -1,0 +1,41 @@
+version: '3'
+
+services:
+  
+  my-rabbitmq:
+    image: 'rabbitmq:3.8-management-alpine'
+    domainname: rabbitmq.com
+    hostname: 'my-rabbitmq'
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+    # networks:
+    #   - network
+    volumes:
+      - ./rabbitmq-isolated.conf:/etc/rabbitmq/rabbitmq.config
+    healthcheck:
+      test: ['CMD', 'rabbitmq', 'status']
+      interval: 30s
+      timeout: 15s
+      retries: 3
+
+  worker:
+    build: worker
+    # depends_on: 
+    #  - server
+    volumes:
+      - ./worker:/app
+    environment: # send python output straight to terminal
+      AMQP_URL: 'amqp://rabbitmq?connection_attempts=5&retry_delay=5'
+
+  server:
+    build: server
+    volumes:
+      - ./server:/app
+    ports:
+      - 5000:5000
+    environment: # send python output straight to terminal
+      AMQP_URL: 'amqp://rabbitmq?connection_attempts=5&retry_delay=5'
+
+# networks:
+#   network: {}
