@@ -5,7 +5,7 @@ from threaded_greyscale_converter import batch_processing
 from tempfile import NamedTemporaryFile
 
 from timestamp_utils import add_timestamp_to_filename, get_timestamp_from_filename, remove_timestamp_from_filename
-from file_utils import lock_delete
+from file_utils import lock_delete, allowed_file, is_zip
 
 # create app with a loaded config
 def create_app():
@@ -17,16 +17,6 @@ def create_app():
 
 app = create_app()
 app.secret_key = b"[-jA_AnvyG]|>*T"
-
-# check if the filename is a png, jpg, or zip (or whatever is in the config JSON)
-def allowed_file(filename):
-    print(app.config["VALID_EXTENSIONS"])
-    print(filename.rsplit('.', 1)[1].lower())
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config["VALID_EXTENSIONS"]
-
-# check if the file is a zip file
-def is_zip(filename):
-    return filename.rsplit('.', 1)[1].lower() == "zip"
 
 # home route
 @app.route("/")
