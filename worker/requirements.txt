@@ -1,0 +1,6 @@
+numpy==1.19.2
+pillow==7.2.0
+flask==1.1.2
+requests==2.24.0 
+filelock==3.0.12
+pika==1.1.0
