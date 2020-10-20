@@ -143,7 +143,7 @@ def batch_processing(src, dest, mode="single", max_workers=4, weights=None, time
                     else:
                         submitted.add_done_callback(lambda x: semaphore.release())
                         executed.add(submitted)
-                        semaphore.release()
+                        # semaphore.release()
 
             else:
                 # submit function extract_single_image with image_rul as the argument

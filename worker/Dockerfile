@@ -28,8 +28,13 @@ COPY . /app
 RUN mkdir tmp && cd tmp
 RUN mkdir uploads && mkdir processed && cd ..
 
+RUN ls -l
+
 # run `python3 rbmq-worker.py`
 ENTRYPOINT [ "python3" ]
-
 CMD [ "rbmq_worker.py" ]
+
+# alternative
+# ADD rbmq_worker.py /
+# CMD [ "python3", "./rbmq_worker.py" ]
 

@@ -1,13 +1,14 @@
-import requests, io, os, zipfile, shutil, json, filelock, pika, time
-from functools import partial
-from flask import Flask, request
-from tempfile import NamedTemporaryFile
-
-from timestamp_utils import add_timestamp_to_filename, get_timestamp_from_filename, remove_timestamp_from_filename
-from file_utils import lock_delete, allowed_file, is_zip
+import io, os, zipfile, shutil, json, filelock, pika, time
 import numpy as np
+import concurrent.futures
+
+from functools import partial
+from tempfile import NamedTemporaryFile
+from timestamp_utils import add_timestamp_to_filename, get_timestamp_from_filename, remove_timestamp_from_filename
 from PIL import Image
+from threading import Semaphore
 from concurrent.futures import ThreadPoolExecutor, wait, ALL_COMPLETED
+from retry import retry
 
 EXCHANGE = 'exchange'
 QUEUE = 'exchage.reciever'
@@ -15,62 +16,135 @@ QUEUE = 'exchage.reciever'
 UPLOADS = 'tmp/uploads'
 PROCESSED = 'tmp/processed'
 
+WAIT_TIME = 1
+HOST_IP = '172.17.0.1' # '127.0.0.1'
+PORT = '5672'
+MAX_WORKERS = 4
+MULTI_THREAD = False
+
+semaphore = Semaphore(MAX_WORKERS)
+
 def main():   
-    print(' [*] Connecting to server ...')
+    global semaphore
+
+    print('Waiting {}s before startup ...'.format(WAIT_TIME))
+    time.sleep(WAIT_TIME)
+    print('Connecting to server {}:{} ...'.format(HOST_IP, PORT))
+
+    connection = connect()
+    channel = setup_consume(connection)
+
+    # don't consume if we don't have available workers
+    while (True):
+        if not MULTI_THREAD or semaphore._value > 0:
+            try:
+                print(' [*] Waiting for messages.')
+                channel.start_consuming()
+            except KeyboardInterrupt:
+                channel.close()
+                connection.close()
+                break
+
+@retry(pika.exceptions.AMQPConnectionError, delay=5, jitter=(1, 3))
+def connect():
+    print("Setting up connection ...")
     try:
         creds = pika.PlainCredentials('guest', 'guest')
-        # params = pika.ConnectionParameters('127.0.0.1', 5672, '/', creds)
-        connection = pika.BlockingConnection(pika.ConnectionParameters(host='127.0.0.1', port=5672, credentials=creds))
-        channel = connection.channel()
-        channel.queue_declare(queue='task_queue', durable=True)
-        print(' [*] Waiting for messages.')
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=HOST_IP, port=PORT, credentials=creds))
+        # channel = connection.channel()
+        # channel.queue_declare(queue='task_queue', durable=True)
+        
 
+        # channel.basic_qos(prefetch_count=1)
+        # channel.basic_consume(queue='task_queue', on_message_callback=callback)
+    except Exception as e:
+            print('Encountered error on worker startup: {}, attempting recovery'.format(repr(e)))
+
+    return connection
+
+@retry(pika.exceptions.AMQPConnectionError, delay=5, jitter=(1, 3))
+def setup_consume(connection):
+    print("Setting up channel ...")
+    if connection is None:
+        raise pika.exceptions.ConnectionWrongStateError
+
+    channel = connection.channel()
+    try:
+        channel.queue_declare(queue='task_queue', durable=True)
 
         channel.basic_qos(prefetch_count=1)
         channel.basic_consume(queue='task_queue', on_message_callback=callback)
-    except Exception as e:
-            print('Encountered error on worker startup: {}'.format(repr(e)))
+        
+        print('Waiting for messages')
 
-    while (True):
-        try:
-            channel.start_consuming()
-        except Exception as e:
-            print('Encountered error on worker consume: {}'.format(repr(e)))
-            channel.close()
-            break
+    except Exception as e:
+        print('Encountered error on worker consume: {}, attempting recovery'.format(repr(e)))
+        channel.close()
+
+    return channel
 
 def callback(ch, method, properties, body):
-        if len(body) == 0:
-            ch.basic_ack(delivery_tag=method.delivery_tag)
+    global semaphore
+
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
+    if len(body) > 0:
+
+        f = None
+        image_files = []
+        is_single_image = True
+        try:
+            if is_single_image:
+                filename = add_timestamp_to_filename('received_image.jpg')
+                print("Got file {} as message".format(filename))
+
+                f = open(filename,'wb+')
+                f.write(body)
+                image_files.append(f)
+
+        except Exception:
+            return 
+
+        ret_msg = "Empty"
+        if MULTI_THREAD:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                try:
+                    for image in image_files:
+                        semaphore.acquire()
+                        
+                        # convert 
+                        submitted = executor.submit(convert_to_greyscale_multi, image)
+
+                        # change this later
+                        ret_msg = "returning"
+                except:
+                    semaphore.release()
+                else:
+                    submitted.add_done_callback(lambda x: semaphore.release())
         else:
-            filename = add_timestamp_to_filename('received_image.jpg')
-            f = open(filename,'wb+')
-            f.write(body)
-            
-            print("Got file {} as message".format(filename))
-
-            # basic 
-            rgb = Image.open(f)
-            gry = Image.fromarray(convert_to_greyscale(np.asarray(rgb))).convert('RGB')
-
-            # use batch processing (how to include zip files?)
+            gry = convert_to_greyscale(Image.open(f))
 
             ret_msg = io.BytesIO()
             gry.save(ret_msg, format='JPEG')
+        
 
-            ch.basic_ack(delivery_tag=method.delivery_tag)
-            ch.basic_publish(
-                exchange='',
-                routing_key='server_queue',
-                body=ret_msg.getvalue(),
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # make message persistent
-                ))
+        print("Sending back grayscale file...")
+        ch.basic_publish(
+            exchange='',
+            routing_key='server_queue',
+            body=ret_msg.getvalue(),
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # make message persistent
+            ))
 
 # converts an image to grayscale using averages
 def convert_to_greyscale(img_mat):
-    return np.average(img_mat, axis=-1)
+    gry = np.average(np.asarray(img_mat), axis=-1)
+    return Image.fromarray(gry).convert('RGB')
 
+# use tmp folders here
+def convert_to_greyscale_multi(img_mat):
+    pass
 
 
 if __name__ == '__main__':
