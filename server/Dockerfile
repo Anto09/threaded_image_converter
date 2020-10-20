@@ -16,8 +16,9 @@ RUN pip3 install --upgrade pip && \
 
 COPY . /app
 
+EXPOSE 5000
+
 # run `python3 rbmq-server.py`
 ENTRYPOINT [ "python3" ]
 
 CMD [ "rbmq_server.py" ]
-EXPOSE 5000
