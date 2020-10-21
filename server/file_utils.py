@@ -15,8 +15,8 @@ def lock_delete(filepath, timeout=1, DEBUG=True):
     return 0
 
 # check if the filename is a png, jpg, or zip (or whatever is in the config JSON)
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config["VALID_EXTENSIONS"]
+def allowed_file(filename, extensions):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in extensions
 
 # check if the file is a zip file
 def is_zip(filename):
