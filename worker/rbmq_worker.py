@@ -20,7 +20,7 @@ WAIT_TIME = 1
 HOST_IP = '172.17.0.1' # '127.0.0.1'
 PORT = '5672'
 MAX_WORKERS = 4
-MULTI_THREAD = False
+MULTI_THREAD = True
 VALID_EXTENSIONS = ['jpg', 'png', 'zip']
 
 semaphore = Semaphore(MAX_WORKERS)
@@ -91,53 +91,52 @@ def callback(ch, method, properties, body):
     extension = method.routing_key.split('_')[1]
     if len(body) > 0:
         f = None
-        image_files = []
-        is_single_image = extension != 'zip'
+        gry = None
         try:
-            if is_single_image:
-                filename = add_timestamp_to_filename('received_image.jpg')
-                print("Got file {} as message".format(filename))
+            filename = add_timestamp_to_filename('receieved.' + extension)
+            timestamp = get_timestamp_from_filename(filename)
+            print("Got file {} as message".format(filename))
 
-                f = open(filename,'wb+')
-                f.write(body)
-                image_files.append(f)
+            print('Saving to local storage ...')
+            path_to_file_upload = os.path.join(UPLOADS, filename)
+            f = open(path_to_file_upload,'wb+')
+            f.write(body)
+            f.close()
+            print('... Done!')
+
+            if MULTI_THREAD:
+                print('Processing in multi-threading mode ...')
+                with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    try:
+                        submitted = executor.submit(convert_to_greyscale_multi, filename.split('.')[0], extension, timestamp)
+                    except:
+                        semaphore.release()
+                    else:
+                        submitted.add_done_callback(lambda x: semaphore.release())
+                
+                file_loc = "{}/{}_gray.{}".format(PROCESSED, filename.split('.')[0], extension)
+                print('Loading saved file {}...'.format(file_loc))
+
+                print(os.path.exists(file_loc))
+                gry = open(file_loc, "rb").read()
+            else:
+                gry = convert_to_greyscale(Image.open(f))
+                ret_msg = io.BytesIO()
+                ret_msg = gry.save(ret_msg, format=extension)
+                gry = ret_msg.getvalue()
 
         except Exception:
             return 
 
-        ret_msg = "Empty"
-        if MULTI_THREAD:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                try:
-                    for image in image_files:
-                        semaphore.acquire()
-                        
-                        # convert 
-                        submitted = executor.submit(convert_to_greyscale_multi, image)
-
-                        # change this later
-                        ret_msg = "returning"
-                except:
-                    semaphore.release()
-                else:
-                    submitted.add_done_callback(lambda x: semaphore.release())
-        else:
-            gry = convert_to_greyscale(Image.open(f))
-
-            ret_msg = io.BytesIO()
-            gry.save(ret_msg, format='JPEG')
-        
-        # Save file
-        gry.save("{}/{}_gray.{}".format(PROCESSED, add_timestamp_to_filename('image'), 'jpg'))
-
-        print("Sending back grayscale file to exchange: server with routing key: server_{}...".format(extension))
-        ch.basic_publish(
-            exchange='server',
-            routing_key='server_' + extension,
-            body=ret_msg.getvalue(),
-            properties=pika.BasicProperties(
-                delivery_mode=2,  # make message persistent
-            ))
+        if gry is not None:
+            print("Sending back grayscale file to exchange: server with routing key: server_{}...".format(extension))
+            ch.basic_publish(
+                exchange='server',
+                routing_key='server_' + extension,
+                body=gry,
+                properties=pika.BasicProperties(
+                    delivery_mode=2,  # make message persistent
+                ))
 
 @retry(pika.exceptions.AMQPConnectionError, delay=5, jitter=(1, 3))
 def setup_exchanges(channel, mode='direct'):
@@ -159,11 +158,84 @@ def setup_exchanges(channel, mode='direct'):
 # converts an image to grayscale using averages
 def convert_to_greyscale(img_mat):
     gry = np.average(np.asarray(img_mat), axis=-1)
-    return Image.fromarray(gry).convert('RGB')
+    ret = Image.fromarray(gry).convert('RGB')
+    return ret
 
 # use tmp folders here
-def convert_to_greyscale_multi(img_mat):
-    pass
+def convert_to_greyscale_multi(filename, extension, timestamp):     
+    is_single_image = (extension != 'zip')
+
+    # for zip
+    image_files = []
+    upload_filename = os.path.join(UPLOADS, filename+'.'+extension)
+    processed_filename = "{}/{}_gray.{}".format(PROCESSED, filename, extension)
+    if is_single_image:
+
+        print('Single image {} encountered: converting to grayscale ...'.format(upload_filename))
+        try:
+            rgb = Image.open(upload_filename)
+            gry = convert_to_greyscale(np.asarray(rgb))
+            print('... Done!')
+        except Exception as e:
+            print("... Exception encountered while converting: {}".format(repr(e)))
+
+        print('Saving as: {}...'.format(processed_filename))
+        try:
+            gry.save(processed_filename)
+            print('... Done!')
+        except Exception as e:
+            print("... Exception encountered while saving: {}".format(repr(e)))
+    else:
+        # READ ZIP
+        print('Zip {} encountered: converting to elements to grayscale ...'.format(upload_filename))
+
+        try:
+            with zipfile.ZipFile(upload_filename, "r") as zip_obj:
+                # add timestamping to unzip files
+                zip_files = zip_obj.namelist()
+
+                for target_file in zip_files: 
+                    print(' Processing file: {} ...'.format(target_file))
+                    split_target = target_file.split(".")
+                    target_name = split_target[0] + "_" + timestamp + "." + split_target[1]
+
+                    if split_target[1] != 'jpg' and split_target[1] != 'png':
+                        continue
+                    
+                    target_path = os.path.join(UPLOADS, target_name)
+                    with open(target_path, "wb") as zf: 
+                        zf.write(zip_obj.read(target_file)) 
+                        rgb = Image.open(target_path)
+                        gry = convert_to_greyscale(np.asarray(rgb))
+                        processed_filename = "{}/{}_gray.{}".format(PROCESSED, target_name.split('.')[0], target_name.split('.')[1])
+
+                        print(' Saving as: {} ...'.format(processed_filename))
+                        gry.save(processed_filename)
+                        image_files.append(processed_filename)
+                    print(' ...Done')
+
+                # write to zip
+                processed_filename = os.path.join(PROCESSED, "{}_gray.{}".format(filename, extension))
+                print("Writing new zipfile {} ...".format(processed_filename))
+                try:
+                    with zipfile.ZipFile(processed_filename, "w") as zip_obj:
+                        for image_file in image_files:
+                            raw_filename = image_file.split('/')[-1]
+                            print(' Writing file {} ...'.format(raw_filename))
+
+                            # write to zip
+                            try:
+                                zip_obj.write(os.path.join(PROCESSED, raw_filename), raw_filename)
+                            except Exception as e:
+                                print(' Exception encounterd: {}'.format(repr(e)))
+                            print(' ...Done')
+                except Exception as e:
+                    print('Exception encounterd: {}'.format(repr(e)))
+                print('...Done')
+
+        except Exception as e:
+            print('Exception encountered while processing zip: {}'.format(repr(e)))
+
 
 
 if __name__ == '__main__':
