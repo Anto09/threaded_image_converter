@@ -25,10 +25,8 @@ RUN pip3 install --upgrade pip && \
 COPY . /app
 
 # make temp file folders 
-RUN mkdir tmp && cd tmp
-RUN mkdir uploads && mkdir processed && cd ..
-
-RUN ls -l
+RUN mkdir tmp
+RUN mkdir /tmp/uploads && mkdir /tmp/processed
 
 # run `python3 rbmq-worker.py`
 ENTRYPOINT [ "python3" ]

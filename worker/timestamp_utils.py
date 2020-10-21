@@ -6,7 +6,11 @@ def add_timestamp_to_filename(filename):
     now = datetime.now()
 
     split_name = filename.split(".")
-    return "{}_{}.{}".format(split_name[0], now.strftime("D%Y%m%dT%H%M%S%f"), split_name[1])
+
+    if len(split_name) > 1:
+        return "{}_{}.{}".format(split_name[0], now.strftime("D%Y%m%dT%H%M%S%f"), split_name[1])
+    else:
+        return "{}_{}".format(split_name[0], now.strftime("D%Y%m%dT%H%M%S%f"))
 
 def get_timestamp_from_filename(filename):
     # split into name and extension
@@ -26,6 +30,7 @@ def remove_timestamp_from_filename(filename):
     match = re.search(regex, split_name[0])
 
     removed_timestamp_name = split_name[0][:match.span()[0]] + split_name[0][match.span()[1]:]
+
     return removed_timestamp_name + "." + split_name[1]
 
     # for no timestamps
