@@ -225,7 +225,7 @@ def convert_to_greyscale_multi(filename, extension, timestamp):
 
                             # write to zip
                             try:
-                                zip_obj.write(os.path.join(PROCESSED, raw_filename), raw_filename)
+                                zip_obj.write(os.path.join(PROCESSED, raw_filename), remove_timestamp_from_filename(raw_filename))
                             except Exception as e:
                                 print(' Exception encounterd: {}'.format(repr(e)))
                             print(' ...Done')
